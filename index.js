@@ -1,5 +1,5 @@
 //----------------------------------------------------
-// PVP BOT + INTELLIGENT BODYGUARD SYSTEM
+// ULTRA PRO MAX PVP BOT - 20 BLOCK SPHERE TP
 //----------------------------------------------------
 const mineflayer = require('mineflayer');
 const { pathfinder, Movements, goals } = require('mineflayer-pathfinder');
@@ -29,35 +29,19 @@ let spawnPos = null;
 let hasOp = false;
 let opRequested = false;
 let kitGiven = false;
-let autoEquipInProgress = false;
 
-// ---------------- INTELLIGENT BODYGUARD SYSTEM ----------------
+// ---------------- ULTRA PRO MAX SETTINGS ----------------
 let guardMode = false;
 let guardedPlayer = null;
-let guardFollowInterval = null;
-let guardCheckInterval = null;
-let lastThreatCheck = 0;
-let isInCombat = false;
-let combatStartTime = 0;
+let guardInterval = null;
+let combatInterval = null;
 
-// List of hostile mobs to attack
-const HOSTILE_MOBS = [
-  'zombie', 'skeleton', 'spider', 'creeper', 'enderman', 'witch',
-  'slime', 'magma_cube', 'blaze', 'ghast', 'wither_skeleton',
-  'guardian', 'elder_guardian', 'shulker', 'evoker', 'vex',
-  'vindicator', 'pillager', 'ravager', 'phantom', 'drowned',
-  'husk', 'stray', 'hoglin', 'zoglin', 'piglin_brute'
-];
-
-// List of passive mobs to IGNORE
-const PASSIVE_MOBS = [
-  'cow', 'pig', 'sheep', 'chicken', 'rabbit', 'horse', 'donkey',
-  'mule', 'llama', 'cat', 'wolf', 'ocelot', 'fox', 'panda',
-  'bee', 'dolphin', 'turtle', 'parrot', 'bat', 'squid',
-  'glow_squid', 'cod', 'salmon', 'tropical_fish', 'pufferfish',
-  'villager', 'wandering_trader', 'iron_golem', 'snow_golem',
-  'strider', 'axolotl', 'goat'
-];
+// ULTRA PRO MAX COMBAT SETTINGS
+const ULTRA_JUMP_DELAY = 200; // Fast jumps (200ms) for maximum crits
+const ULTRA_ATTACK_SPEED = 100; // Max attack speed
+const TELEPORT_DISTANCE = 20; // 20 BLOCK SPHERE - up/down/left/right ANY DIRECTION
+const ATTACK_RANGE = 4.5; // Max attack range
+const MAX_COMBAT_TIME = 45000; // 45 seconds max combat
 
 // ---------------- UTILS ----------------
 function randomName() {
@@ -65,366 +49,226 @@ function randomName() {
 }
 const delay = ms => new Promise(r => setTimeout(r, ms));
 
-function isHostileMob(mobType) {
-  if (!mobType) return false;
-  const typeLower = mobType.toLowerCase();
-  return HOSTILE_MOBS.some(hostile => typeLower.includes(hostile));
+// Calculate 3D distance (for sphere)
+function getDistance3D(pos1, pos2) {
+  const dx = pos1.x - pos2.x;
+  const dy = pos1.y - pos2.y;
+  const dz = pos1.z - pos2.z;
+  return Math.sqrt(dx*dx + dy*dy + dz*dz);
 }
 
-function isPassiveMob(mobType) {
-  if (!mobType) return false;
-  const typeLower = mobType.toLowerCase();
-  return PASSIVE_MOBS.some(passive => typeLower.includes(passive));
-}
-
-// ---------------- AUTOMATIC EQUIPMENT SYSTEM ----------------
-function isItemInHotbar(item) {
-  return item && item.slot >= 36 && item.slot <= 44;
-}
-
-async function autoHoldAndEquip(itemName) {
+// ---------------- ULTRA PRO MAX EQUIP SYSTEM ----------------
+async function ultraEquip() {
+  console.log('[ULTRA] Equipping...');
+  
   const items = bot.inventory.items();
-  const item = items.find(i => i.name === itemName);
-
-  if (!item) return false;
-
-  // If already in hotbar, switch to it
-  if (isItemInHotbar(item)) {
-    const hotbarIndex = item.slot - 36;
-    bot.setQuickBarSlot(hotbarIndex);
-    console.log(`[EQUIP] Holding ${itemName} in hotbar slot ${hotbarIndex}`);
-    await delay(200);
-    return true;
-  }
-
-  // Try OP method to move to hotbar
-  if (hasOp) {
-    for (let i = 36; i < 45; i++) {
-      if (!bot.inventory.slots[i]) {
-        const hotbarIndex = i - 36;
-        bot.chat(`/replaceitem entity @s slot.hotbar.${hotbarIndex} ${itemName} 1`);
-        console.log(`[EQUIP] OP moved ${itemName} to hotbar`);
-        await delay(500);
-
-        // Switch to it
-        bot.setQuickBarSlot(hotbarIndex);
-        await delay(200);
-        return true;
-      }
+  
+  // Sword to hand
+  const sword = items.find(i => i.name.includes('sword'));
+  if (sword) {
+    try {
+      await bot.equip(sword, 'hand');
+      console.log(`[ULTRA] ${sword.name} equipped!`);
+    } catch (e) {
+      console.log(`[ULTRA] Sword error: ${e.message}`);
     }
   }
-
-  return false;
-}
-
-async function automaticEquipmentSequence() {
-  if (autoEquipInProgress) return;
-  autoEquipInProgress = true;
-
-  const equipmentList = [
-    'diamond_boots',
-    'diamond_leggings',
-    'diamond_chestplate',
-    'diamond_helmet',
-    'diamond_sword',
-    'shield'
-  ];
-
-  for (const item of equipmentList) {
-    await autoHoldAndEquip(item);
-    await delay(500);
+  
+  // Use OP commands for instant gear
+  if (hasOp) {
+    const opCommands = [
+      '/replaceitem entity @s slot.hotbar.0 diamond_sword 1',
+      '/replaceitem entity @s armor.head diamond_helmet 1',
+      '/replaceitem entity @s armor.chest diamond_chestplate 1',
+      '/replaceitem entity @s armor.legs diamond_leggings 1',
+      '/replaceitem entity @s armor.feet diamond_boots 1',
+      '/replaceitem entity @s weapon.offhand shield 1'
+    ];
+    
+    for (const cmd of opCommands) {
+      bot.chat(cmd);
+      await delay(200);
+    }
+    console.log('[ULTRA] OP gear equipped!');
   }
-
-  autoEquipInProgress = false;
+  
   return true;
 }
 
-// ---------------- SMART MOVEMENT SYSTEM ----------------
-class SmartBodyguard {
-  constructor() {
-    this.lastJumpTime = 0;
-    this.lastSprintCheck = 0;
-    this.isSprinting = false;
-    this.followDistance = 3;
-    this.maxFollowDistance = 15;
-    this.teleportCooldown = 0;
-  }
-
-  shouldJump() {
-    const now = Date.now();
-    if (now - this.lastJumpTime < 1000) return false;
-
-    if (isInCombat) {
-      // Jump for critical hits
-      return Math.random() < 0.3;
+// ---------------- ULTRA PRO MAX COMBAT SYSTEM ----------------
+function startUltraCombat(target) {
+  console.log(`[ULTRA COMBAT] Engaging ${target.username || 'target'}!`);
+  
+  pvpMode = true;
+  currentTarget = target;
+  
+  // Equip before fighting
+  setTimeout(() => ultraEquip(), 100);
+  
+  // Start attacking
+  setTimeout(() => {
+    try {
+      bot.pvp.attack(target);
+      console.log('[ULTRA COMBAT] Attack started!');
+    } catch (e) {
+      console.log(`[ULTRA COMBAT] Attack error: ${e.message}`);
     }
-
-    return Math.random() < 0.01;
-  }
-
-  shouldSprint() {
-    const now = Date.now();
-    if (now - this.lastSprintCheck < 2000) return this.isSprinting;
-
-    this.lastSprintCheck = now;
-
-    if (isInCombat) {
-      this.isSprinting = true;
-      return true;
-    }
-
-    if (guardMode && guardedPlayer) {
-      const player = bot.players[guardedPlayer];
-      if (player && player.entity) {
-        // Check if player is moving
-        this.isSprinting = true; // Always sprint when following
-        return true;
-      }
-    }
-
-    this.isSprinting = false;
-    return false;
-  }
-
-  updateMovement() {
-    if (this.shouldSprint()) {
-      bot.setControlState('sprint', true);
-    } else {
-      bot.setControlState('sprint', false);
-    }
-
-    if (this.shouldJump()) {
-      bot.setControlState('jump', true);
-      this.lastJumpTime = Date.now();
-      setTimeout(() => bot.setControlState('jump', false), 100);
-    }
-  }
-}
-
-const smartGuard = new SmartBodyguard();
-
-// ---------------- INTELLIGENT FOLLOW SYSTEM ----------------
-function startSmartFollowing() {
-  if (guardFollowInterval) clearInterval(guardFollowInterval);
-
-  guardFollowInterval = setInterval(async () => {
-    if (!guardMode || !guardedPlayer) return;
-
-    const player = bot.players[guardedPlayer];
-    if (!player || !player.entity) {
-      console.log(`[GUARD] Lost sight of ${guardedPlayer}`);
+  }, 200);
+  
+  // ULTRA PRO MAX COMBAT LOOP
+  if (combatInterval) clearInterval(combatInterval);
+  combatInterval = setInterval(() => {
+    if (!pvpMode || !currentTarget) {
+      clearInterval(combatInterval);
       return;
     }
-
-    const playerPos = player.entity.position;
-    const botPos = bot.entity.position;
-    const distance = botPos.distanceTo(playerPos);
-
-    smartGuard.updateMovement();
-
-    // Teleport if too far and has OP
-    if (distance > smartGuard.maxFollowDistance) {
-      if (hasOp && !isInCombat && smartGuard.teleportCooldown === 0) {
-        console.log(`[GUARD] Teleporting to ${guardedPlayer}`);
-        bot.chat(`/tp @s ${guardedPlayer}`);
-        smartGuard.teleportCooldown = 5;
-
-        setTimeout(() => {
-          smartGuard.teleportCooldown = 0;
-        }, 5000);
-        return;
+    
+    // ULTRA FAST JUMPING for critical hits
+    bot.setControlState('jump', true);
+    setTimeout(() => bot.setControlState('jump', false), 50);
+    
+    // ULTRA SPRINT (always sprint in combat)
+    bot.setControlState('sprint', true);
+    
+    // Check target distance
+    if (currentTarget.position) {
+      const distance = getDistance3D(bot.entity.position, currentTarget.position);
+      
+      // If target is in attack range, keep attacking
+      if (distance <= ATTACK_RANGE) {
+        // Rapid attack (simulate clicking)
+        if (bot.heldItem && bot.heldItem.name.includes('sword')) {
+          // This makes attack speed ultra fast
+          bot.swingArm('right');
+        }
       }
     }
+    
+  }, ULTRA_JUMP_DELAY); // ULTRA FAST JUMP TIMING
+  
+  // Auto stop combat after 45 seconds
+  setTimeout(() => {
+    if (pvpMode) {
+      console.log('[ULTRA COMBAT] Combat timeout (45s)');
+      stopUltraCombat();
+    }
+  }, MAX_COMBAT_TIME);
+}
 
-    // Stop if close enough
-    if (distance <= smartGuard.followDistance) {
-      if (bot.pathfinder.isMoving() && !isInCombat) {
+function stopUltraCombat() {
+  console.log('[ULTRA COMBAT] Stopping combat');
+  
+  pvpMode = false;
+  currentTarget = null;
+  
+  if (combatInterval) {
+    clearInterval(combatInterval);
+    combatInterval = null;
+  }
+  
+  bot.pvp.stop();
+  bot.setControlState('sprint', false);
+  bot.setControlState('jump', false);
+}
+
+// ---------------- 20 BLOCK SPHERE TELEPORT SYSTEM ----------------
+function startUltraGuard(playerName) {
+  console.log(`[ULTRA GUARD] Guarding ${playerName} with 20-block sphere TP`);
+  
+  const player = bot.players[playerName];
+  if (!player || !player.entity) {
+    console.log(`[ULTRA GUARD] Player not found`);
+    return false;
+  }
+  
+  guardedPlayer = playerName;
+  guardMode = true;
+  
+  // Stop any combat
+  stopUltraCombat();
+  
+  // Start 20-block sphere guard system
+  if (guardInterval) clearInterval(guardInterval);
+  guardInterval = setInterval(() => {
+    if (!guardMode || !guardedPlayer) return;
+    
+    const player = bot.players[guardedPlayer];
+    if (!player || !player.entity) {
+      console.log(`[ULTRA GUARD] Lost player`);
+      return;
+    }
+    
+    const playerPos = player.entity.position;
+    const botPos = bot.entity.position;
+    
+    // Calculate 3D distance (SPHERE - includes up/down)
+    const distance = getDistance3D(playerPos, botPos);
+    
+    console.log(`[ULTRA GUARD] Distance: ${Math.round(distance)} blocks (3D sphere)`);
+    
+    // 🔥 20 BLOCK SPHERE TELEPORT 🔥
+    // Up/Down/Left/Right/Forward/Back ANY DIRECTION > 20 blocks = INSTANT TP
+    if (distance > TELEPORT_DISTANCE && hasOp) {
+      console.log(`[ULTRA GUARD] ${Math.round(distance)} > 20 blocks! TELEPORTING!`);
+      bot.chat(`/tp @s ${guardedPlayer}`);
+      return;
+    }
+    
+    // If close enough (3 blocks), chill
+    if (distance <= 3) {
+      if (bot.pathfinder.isMoving()) {
         bot.pathfinder.setGoal(null);
       }
       return;
     }
-
-    // Follow player
+    
+    // Follow player (smooth)
     const mcData = require('minecraft-data')(bot.version);
     const movements = new Movements(bot, mcData);
     movements.allowSprinting = true;
     bot.pathfinder.setMovements(movements);
-
+    
     bot.pathfinder.setGoal(new goals.GoalNear(
       playerPos.x,
       playerPos.y,
       playerPos.z,
-      smartGuard.followDistance
-    ), true);
-
-  }, 1000);
-}
-
-// ---------------- INTELLIGENT THREAT ASSESSMENT ----------------
-function assessThreats() {
-  if (!guardMode || !guardedPlayer || isInCombat) return null;
-
-  const player = bot.players[guardedPlayer];
-  if (!player || !player.entity) return null;
-
-  const playerPos = player.entity.position;
-  const now = Date.now();
-
-  if (now - lastThreatCheck < 2000) return null;
-  lastThreatCheck = now;
-
-  // Find threats near player
-  const nearbyEntities = Object.values(bot.entities).filter(e =>
-    e.position.distanceTo(playerPos) < 10 &&
-    e.type !== 'object' &&
-    e.type !== 'orb' &&
-    e.type !== 'arrow' &&
-    e.type !== 'item'
-  );
-
-  let highestThreat = null;
-  let highestPriority = 0;
-
-  for (const entity of nearbyEntities) {
-    let threatPriority = 0;
-
-    // Player attacking guarded player
-    if (entity.type === 'player' && entity.username !== guardedPlayer && entity.username !== bot.username) {
-      threatPriority = 3;
-    }
-    // Hostile mob (use entity.name which contains mob type)
-    else if (entity.type === 'mob' && entity.name && isHostileMob(entity.name)) {
-      threatPriority = 2;
-    }
-    // Passive mob (ignore)
-    else if (entity.type === 'mob' && entity.name && isPassiveMob(entity.name)) {
-      threatPriority = 0;
-      continue; // Skip passive mobs
-    }
-
-    if (threatPriority > highestPriority) {
-      highestPriority = threatPriority;
-      highestThreat = entity;
-    }
-  }
-
-  return highestPriority >= 2 ? highestThreat : null;
-}
-
-// ---------------- INTELLIGENT COMBAT SYSTEM ----------------
-function engageThreat(threat) {
-  if (!threat || !guardMode || isInCombat) return;
-
-  console.log(`[GUARD] Engaging threat: ${threat.username || threat.name || 'unknown'}`);
-  isInCombat = true;
-  combatStartTime = Date.now();
-
-  if (guardFollowInterval) {
-    clearInterval(guardFollowInterval);
-    guardFollowInterval = null;
-  }
-
-  const combatInterval = setInterval(() => {
-    if (!isInCombat) {
-      clearInterval(combatInterval);
-      return;
-    }
-
-    smartGuard.updateMovement();
-
-    if (!threat.isValid || threat.health <= 0 || threat.position.distanceTo(bot.entity.position) > 15) {
-      console.log(`[GUARD] Threat eliminated`);
-      disengageCombat();
-      clearInterval(combatInterval);
-      return;
-    }
-
-    bot.pvp.attack(threat);
-
-  }, 100);
-
-  bot.pvp.attack(threat);
-
-  setTimeout(() => {
-    if (isInCombat) {
-      console.log(`[GUARD] Combat timeout`);
-      disengageCombat();
-      clearInterval(combatInterval);
-    }
-  }, 30000);
-}
-
-function disengageCombat() {
-  isInCombat = false;
-  combatStartTime = 0;
-  bot.pvp.stop();
-
-  if (guardMode && guardedPlayer) {
-    console.log(`[GUARD] Resuming guard duty`);
-    startSmartFollowing();
-  }
-}
-
-// ---------------- BODYGUARD CONTROL ----------------
-function startGuarding(playerName) {
-  console.log(`[GUARD] Starting guard for ${playerName}`);
-
-  const player = bot.players[playerName];
-  if (!player) {
-    console.log(`[GUARD] Player ${playerName} not found`);
-    return false;
-  }
-
-  guardedPlayer = playerName;
-  guardMode = true;
-  isInCombat = false;
-
-  // Stop any PvP
-  if (pvpMode) {
-    bot.pvp.stop();
-    pvpMode = false;
-    currentTarget = null;
-  }
-
-  startSmartFollowing();
-
-  if (guardCheckInterval) clearInterval(guardCheckInterval);
-  guardCheckInterval = setInterval(() => {
-    if (!guardMode || isInCombat) return;
-
-    const threat = assessThreats();
-    if (threat) {
-      engageThreat(threat);
-    }
-  }, 2000);
-
-  console.log(`[GUARD] Now guarding ${playerName}`);
+      3
+    ));
+    
+    // Sprint while following
+    bot.setControlState('sprint', true);
+    
+  }, 500); // Check every 500ms (FAST)
+  
+  console.log(`[ULTRA GUARD] Now guarding with 20-block sphere TP system`);
   return true;
 }
 
-function stopGuarding() {
-  console.log('[GUARD] Stopping guard duty');
-
+function stopUltraGuard() {
+  console.log('[ULTRA GUARD] Stopping guard');
+  
   guardMode = false;
   guardedPlayer = null;
-  isInCombat = false;
-
-  if (guardFollowInterval) {
-    clearInterval(guardFollowInterval);
-    guardFollowInterval = null;
+  
+  if (guardInterval) {
+    clearInterval(guardInterval);
+    guardInterval = null;
   }
-
-  if (guardCheckInterval) {
-    clearInterval(guardCheckInterval);
-    guardCheckInterval = null;
-  }
-
+  
   bot.pathfinder.setGoal(null);
-  bot.pvp.stop();
   bot.setControlState('sprint', false);
   bot.setControlState('jump', false);
+  
+  console.log('[ULTRA GUARD] Stopped');
+}
 
-  console.log('[GUARD] Guard duty stopped');
+// ---------------- HOSTILE DETECTION ----------------
+function isHostileMob(mobType) {
+  if (!mobType) return false;
+  const typeLower = mobType.toLowerCase();
+  const hostiles = ['zombie', 'skeleton', 'spider', 'creeper', 'enderman', 'witch', 
+                   'blaze', 'ghast', 'slime', 'magma_cube', 'guardian', 'shulker'];
+  return hostiles.some(h => typeLower.includes(h));
 }
 
 // ---------------- CREATE BOT ----------------
@@ -460,14 +304,17 @@ function createBot() {
       bot.chat(`/login ${config.utils['auto-auth'].password}`);
     }
 
-    // Auto-equip check after spawn
-    setTimeout(async () => {
-      const items = bot.inventory.items();
-      if (items.some(i => i.name.includes('sword'))) {
-        await autoHoldAndEquip('diamond_sword');
+    // Auto-equip check
+    setInterval(async () => {
+      if (!guardMode && !pvpMode) {
+        const items = bot.inventory.items();
+        if (items.some(i => i.name.includes('sword'))) {
+          await ultraEquip();
+        }
       }
-    }, 3000);
+    }, 15000);
 
+    // OP check
     if (opCheckInterval) clearInterval(opCheckInterval);
     opCheckInterval = setInterval(() => {
       if (mode === 'hard' && !hasOp && !opRequested) {
@@ -477,30 +324,19 @@ function createBot() {
     }, 10000);
   });
 
-  // ---------------- FIXED OP DETECTION ----------------
+  // ---------------- OP DETECTION ----------------
   bot.on('message', (jsonMsg) => {
     const msg = jsonMsg.toString();
+    console.log(`[SERVER] ${msg}`);
+    
     const msgLower = msg.toLowerCase();
     const botName = bot.username.toLowerCase();
-
-    console.log(`[CHAT] ${msg}`);
-
-    // Better OP detection
-    if (msgLower.includes('operator') && msgLower.includes(botName)) {
-      console.log('[OP] Detected OP from server message');
+    
+    if (msgLower.includes(botName) && msgLower.includes('op')) {
+      console.log('[OP] DETECTED!');
       hasOp = true;
       opRequested = false;
-    }
-
-    // Direct OP messages
-    if (msgLower.includes('you are now op') ||
-        msgLower.includes('opped') ||
-        msgLower.includes('made operator') ||
-        msgLower.includes('granted operator')) {
-      console.log('[OP] Direct OP detection');
-      hasOp = true;
-      opRequested = false;
-
+      
       if (mode === 'hard' && !kitGiven) {
         kitGiven = true;
         giveHardModeKit();
@@ -508,38 +344,38 @@ function createBot() {
     }
   });
 
-  // ---------------- ATTACK DETECTION ----------------
+  // ---------------- ATTACK DETECTION (ULTRA RULES) ----------------
   bot.on('entityHurt', (entity) => {
-    // Guarded player was attacked
-    if (guardMode && guardedPlayer && entity.type === 'player' && entity.username === guardedPlayer) {
-      console.log(`[GUARD] ${guardedPlayer} was attacked!`);
+    // Rule 1: Bot is attacked → Fight back ULTRA FAST
+    if (entity.id === bot.entity.id) {
+      console.log('[ULTRA] I WAS HIT!');
+      
+      const attacker = bot.nearestEntity(e =>
+        e.type === 'player' &&
+        e.username !== bot.username &&
+        getDistance3D(bot.entity.position, e.position) < 6
+      );
 
+      if (attacker && !pvpMode && !guardMode) {
+        console.log(`[ULTRA] ${attacker.username} hit me! FIGHTING BACK ULTRA FAST!`);
+        startUltraCombat(attacker);
+      }
+    }
+    
+    // Rule 2: Guarded player is attacked → Protect them
+    if (guardMode && guardedPlayer && entity.type === 'player' && entity.username === guardedPlayer) {
+      console.log(`[ULTRA GUARD] ${guardedPlayer} was hit!`);
+      
       const attacker = bot.nearestEntity(e =>
         e.type === 'player' &&
         e.username !== guardedPlayer &&
         e.username !== bot.username &&
-        e.position.distanceTo(entity.position) < 8
-      );
-
-      if (attacker && !isInCombat) {
-        console.log(`[GUARD] ${attacker.username} attacked ${guardedPlayer}! Engaging!`);
-        engageThreat(attacker);
-      }
-    }
-
-    // PvP MODE: Bot was attacked (self-defense)
-    if (!guardMode && entity.id === bot.entity.id) {
-      const attacker = bot.nearestEntity(e =>
-        e.type === 'player' &&
-        e.username !== bot.username &&
-        e.position.distanceTo(bot.entity.position) < 6
+        getDistance3D(entity.position, e.position) < 8
       );
 
       if (attacker && !pvpMode) {
-        console.log('[PVP] Attacked by', attacker.username);
-        currentTarget = attacker;
-        pvpMode = true;
-        startPvP();
+        console.log(`[ULTRA GUARD] ${attacker.username} attacked my player! ATTACKING!`);
+        startUltraCombat(attacker);
       }
     }
   });
@@ -548,180 +384,121 @@ function createBot() {
   bot.on('chat', async (user, msg) => {
     if (user === bot.username) return;
     const cmd = msg.toLowerCase().trim();
+    
+    console.log(`[CHAT] ${user}: ${msg}`);
 
-    console.log(`[CHAT CMD] ${user}: ${cmd}`);
-
-    // Bodyguard commands
-    if (cmd === 'guard me' || cmd === 'guard') {
-      if (startGuarding(user)) {
-        bot.chat(`I will guard you, ${user}!`);
-      } else {
-        bot.chat(`I can't see you, ${user}!`);
+    // 🔥 ULTRA GUARD COMMAND
+    if (cmd === 'guard me') {
+      if (startUltraGuard(user)) {
+        bot.chat(`🛡️ ULTRA GUARD ACTIVATED! I will protect you with 20-block sphere TP!`);
       }
     }
 
-    if (cmd === 'stop' || cmd === 'stop guard') {
+    if (cmd === 'stop guard') {
       if (guardMode && guardedPlayer === user) {
-        stopGuarding();
-        bot.chat('Stopped guard duty.');
-      } else if (guardMode) {
-        bot.chat(`I'm guarding ${guardedPlayer}. Ask them to stop.`);
-      } else {
-        bot.chat('Not guarding anyone.');
+        stopUltraGuard();
+        bot.chat('🛑 Guard stopped.');
       }
     }
 
-    if (cmd === 'follow') {
-      if (!guardMode) {
-        startGuarding(user);
-        bot.chat(`Following you ${user}!`);
-      }
-    }
-
-    if (cmd === 'protect') {
-      if (!guardMode) {
-        startGuarding(user);
-        bot.chat(`Protecting you ${user}!`);
-      }
-    }
-
-    // PvP Commands
-    if (cmd === 'fight') {
+    // 🔥 ULTRA PVP COMMAND
+    if (cmd === 'fight' || cmd === 'fight me') {
       if (guardMode) {
-        bot.chat(`I'm guarding ${guardedPlayer}. Use 'stop' first.`);
+        bot.chat(`I'm guarding ${guardedPlayer}. Say 'stop guard' first.`);
         return;
       }
-
+      
       const player = bot.players[user];
       if (!player) {
-        bot.chat("I can't see you!");
+        bot.chat("Can't see you!");
         return;
       }
-
-      bot.chat(`Okay, let's fight ${user}!`);
-      pvpMode = true;
-      currentTarget = player.entity;
-      startPvP();
+      
+      bot.chat(`⚔️ ULTRA PVP ENGAGED! Prepare for maximum combat!`);
+      startUltraCombat(player.entity);
     }
 
     if (cmd === 'stop fight') {
-      if (pvpMode) {
-        pvpMode = false;
-        currentTarget = null;
-        bot.pvp.stop();
-        bot.chat('Stopped fighting.');
-      }
+      stopUltraCombat();
+      bot.chat('⚔️ Combat stopped.');
     }
 
-    // Mode switching
+    // 🔥 KIT & EQUIP
+    if (cmd === 'givekit') {
+      hasOp = true;
+      kitGiven = true;
+      giveHardModeKit();
+    }
+
+    if (cmd === 'equip') {
+      await ultraEquip();
+      bot.chat('⚡ Ultra equipped!');
+    }
+
+    // 🔥 MODES
     if (['easy', 'normal', 'hard'].includes(cmd)) {
       mode = cmd;
       hasOp = false;
       opRequested = false;
       kitGiven = false;
-      bot.chat(`Mode: ${mode.toUpperCase()}`);
-      console.log('[MODE]', mode);
+      bot.chat(`🎮 Mode: ${mode.toUpperCase()}`);
     }
 
-    if (cmd === 'givekit') {
-      hasOp = true; // Assume we have OP for kit
-      kitGiven = true;
-      giveHardModeKit();
-    }
-
-    if (cmd === 'autoequip') {
-      await automaticEquipmentSequence();
-      bot.chat('Auto-equip complete!');
-    }
-
-    if (cmd === 'opequip') {
-      if (hasOp) {
-        bot.chat('/replaceitem entity @s armor.head diamond_helmet');
-        bot.chat('/replaceitem entity @s armor.chest diamond_chestplate');
-        bot.chat('/replaceitem entity @s armor.legs diamond_leggings');
-        bot.chat('/replaceitem entity @s armor.feet diamond_boots');
-        bot.chat('/replaceitem entity @s weapon.mainhand diamond_sword');
-        bot.chat('/replaceitem entity @s weapon.offhand shield');
-        bot.chat('OP equip complete!');
-      } else {
-        bot.chat('Need OP! Type "givekit" first.');
-      }
-    }
-
+    // 🔥 INFO
     if (cmd === 'status') {
       if (guardMode) {
-        bot.chat(`Guarding ${guardedPlayer} | Combat: ${isInCombat ? 'Yes' : 'No'} | HP: ${bot.health}`);
+        const player = bot.players[guardedPlayer];
+        let distance = 'N/A';
+        if (player && player.entity) {
+          distance = Math.round(getDistance3D(bot.entity.position, player.entity.position));
+        }
+        bot.chat(`🛡️ Guarding ${guardedPlayer} | Distance: ${distance} blocks | HP: ${bot.health}`);
       } else if (pvpMode) {
-        bot.chat(`Fighting ${currentTarget?.username || 'someone'} | HP: ${bot.health}`);
+        bot.chat(`⚔️ ULTRA COMBAT | HP: ${bot.health} | Target: ${currentTarget?.username || 'Unknown'}`);
       } else {
-        bot.chat(`Available | Mode: ${mode} | HP: ${bot.health} | OP: ${hasOp ? 'Yes' : 'No'}`);
+        bot.chat(`✅ Ready | Mode: ${mode} | HP: ${bot.health} | OP: ${hasOp ? 'YES' : 'NO'}`);
       }
     }
 
-    if (cmd === 'help') {
-      bot.chat('Commands: guard me, stop, fight, stop fight, givekit, autoequip, opequip, status, easy/normal/hard');
-    }
-
-    if (cmd === 'testop') {
+    if (cmd === 'test tp') {
       if (hasOp) {
-        bot.chat('/say I have OP permissions!');
-        bot.chat('/give @s diamond 1');
+        bot.chat(`/tp @s ${user}`);
+        bot.chat('✅ Teleported!');
       } else {
-        bot.chat('No OP permissions yet.');
+        bot.chat('❌ Need OP!');
       }
+    }
+
+    if (cmd === 'ultra help') {
+      bot.chat('🔥 ULTRA PRO MAX COMMANDS:');
+      bot.chat('guard me - 20-block sphere guard with instant TP');
+      bot.chat('fight me - Ultra fast PvP combat');
+      bot.chat('givekit - Get full diamond gear');
+      bot.chat('equip - Force equip items');
+      bot.chat('status - Check bot status');
+      bot.chat('test tp - Test teleport');
+      bot.chat('easy/normal/hard - Change mode');
     }
   });
 
-  // ---------------- PVP SYSTEM ----------------
-  async function startPvP() {
-    if (!currentTarget) return;
-
-    console.log('[PVP] Starting fight!');
-
-    // Auto-equip sword before fighting
-    const items = bot.inventory.items();
-    const sword = items.find(i => i.name.includes('sword'));
-    if (sword && isItemInHotbar(sword)) {
-      bot.setQuickBarSlot(sword.slot - 36);
-    }
-
-    try {
-      bot.pvp.attack(currentTarget);
-    } catch (e) {
-      console.log('[PVP] Error:', e.message);
-    }
-  }
-
   // ---------------- PHYSICS TICK ----------------
   bot.on('physicsTick', () => {
-    // Update guard movement
+    // Keep sprinting in guard mode
     if (guardMode) {
-      smartGuard.updateMovement();
-    }
-
-    // PvP combat movement
-    if (pvpMode && currentTarget) {
       bot.setControlState('sprint', true);
-
-      // Jump occasionally for critical hits
-      if (Date.now() % 3000 < 100) {
-        bot.setControlState('jump', true);
-        setTimeout(() => bot.setControlState('jump', false), 100);
-      }
+    }
+    
+    // Stop sprinting when idle
+    if (!pvpMode && !guardMode && !bot.pathfinder.isMoving()) {
+      bot.setControlState('sprint', false);
     }
   });
 
   // ---------------- TARGET GONE ----------------
   bot.on('entityGone', (entity) => {
     if (currentTarget && entity.id === currentTarget.id) {
-      pvpMode = false;
-      currentTarget = null;
-      bot.pvp.stop();
-      console.log('[PVP] Target gone');
-    }
-
-    if (isInCombat) {
-      disengageCombat();
+      console.log('[ULTRA] Target disappeared');
+      stopUltraCombat();
     }
   });
 
@@ -742,13 +519,7 @@ function createBot() {
 // ---------------- HARD MODE KIT ----------------
 async function giveHardModeKit() {
   if (!bot) return;
-  console.log('[KIT] Giving kit...');
-
-  // Clear old items first if OP
-  if (hasOp) {
-    bot.chat('/clear');
-    await delay(1000);
-  }
+  console.log('[ULTRA KIT] Giving ultra kit...');
 
   const commands = [
     '/give @s diamond_sword 1',
@@ -759,41 +530,38 @@ async function giveHardModeKit() {
     '/give @s shield 1',
     '/give @s bow 1',
     '/give @s arrow 64',
-    '/give @s golden_apple 16',
-    '/give @s ender_pearl 16'
+    '/give @s golden_apple 32',
+    '/give @s ender_pearl 32'
   ];
 
   for (const cmd of commands) {
     bot.chat(cmd);
-    await delay(500);
+    await delay(300);
   }
 
-  console.log('[KIT] Done, waiting for items...');
-  await delay(3000);
-
-  console.log('[KIT] Auto-equipping...');
-  await automaticEquipmentSequence();
-  bot.chat('Kit received and equipped! Ready for action!');
+  console.log('[ULTRA KIT] Done, auto-equipping...');
+  await delay(2000);
+  await ultraEquip();
+  bot.chat('🔥 ULTRA KIT READY! Maximum power achieved!');
 }
 
 // ---------------- RESET ----------------
 function reset() {
   if (opCheckInterval) clearInterval(opCheckInterval);
-  if (guardFollowInterval) clearInterval(guardFollowInterval);
-  if (guardCheckInterval) clearInterval(guardCheckInterval);
-
+  if (guardInterval) clearInterval(guardInterval);
+  if (combatInterval) clearInterval(combatInterval);
+  
   botRunning = false;
   pvpMode = false;
   guardMode = false;
   guardedPlayer = null;
-  isInCombat = false;
+  currentTarget = null;
   hasOp = false;
   opRequested = false;
   kitGiven = false;
-  autoEquipInProgress = false;
 
-  console.log('[BOT] Reconnecting in 5s...');
-  setTimeout(createBot, 5000);
+  console.log('[BOT] Reconnecting in 3s...');
+  setTimeout(createBot, 3000);
 }
 
 // ---------------- START ----------------
