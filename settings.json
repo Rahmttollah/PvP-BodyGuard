@@ -1,0 +1,31 @@
+{
+  "bot-account": {
+    "username": "",
+    "password": "",
+    "type": "offline"
+  },
+
+  "server": {
+    "ip": "Rahmttollahai.aternos.me",
+    "port": 48219,
+    "version": "1.12.1"
+  },
+
+  "position": {
+    "enabled": false,
+    "x": 0,
+    "y": 55,
+    "z": 0
+  },
+
+  "utils": {
+    "auto-auth": {
+      "enabled": false,
+      "password": ""
+    },
+
+    "chat-log": true,
+    "auto-reconnect": true,
+    "auto-recconect-delay": 15000
+  }
+}
