@@ -1,8 +1,8 @@
 //----------------------------------------------------
-// ULTRA PRO MAX PVP BOT - 20 BLOCK SPHERE TP
+// PVP BOT - ULTIMATE NETHERITE WITH ANTI-BAN PROTECTION
 //----------------------------------------------------
 const mineflayer = require('mineflayer');
-const { pathfinder, Movements, goals } = require('mineflayer-pathfinder');
+const { pathfinder, Movements } = require('mineflayer-pathfinder');
 const pvp = require('mineflayer-pvp').plugin;
 const mcDataLoader = require('minecraft-data');
 const { v4: uuidv4 } = require('uuid');
@@ -20,6 +20,7 @@ let botRunning = false;
 let currentName = randomName();
 let currentUUID = uuidv4();
 let opCheckInterval = null;
+let antiBanTimeout = null;
 
 let mode = 'normal';
 let pvpMode = false;
@@ -29,19 +30,14 @@ let spawnPos = null;
 let hasOp = false;
 let opRequested = false;
 let kitGiven = false;
+let autoEquipInProgress = false;
 
-// ---------------- ULTRA PRO MAX SETTINGS ----------------
-let guardMode = false;
-let guardedPlayer = null;
-let guardInterval = null;
-let combatInterval = null;
-
-// ULTRA PRO MAX COMBAT SETTINGS
-const ULTRA_JUMP_DELAY = 200; // Fast jumps (200ms) for maximum crits
-const ULTRA_ATTACK_SPEED = 100; // Max attack speed
-const TELEPORT_DISTANCE = 20; // 20 BLOCK SPHERE - up/down/left/right ANY DIRECTION
-const ATTACK_RANGE = 4.5; // Max attack range
-const MAX_COMBAT_TIME = 45000; // 45 seconds max combat
+// ---------------- ANTI-BAN SYSTEM ----------------
+const BAN_TRIGGER_WORDS = [
+  'ban', 'banned', 'kick', 'cheater', 'hacker', 
+  'report', 'staff', 'admin', 'mod', 'owner',
+  'ipban', 'permanent', 'anticheat'
+];
 
 // ---------------- UTILS ----------------
 function randomName() {
@@ -49,226 +45,150 @@ function randomName() {
 }
 const delay = ms => new Promise(r => setTimeout(r, ms));
 
-// Calculate 3D distance (for sphere)
-function getDistance3D(pos1, pos2) {
-  const dx = pos1.x - pos2.x;
-  const dy = pos1.y - pos2.y;
-  const dz = pos1.z - pos2.z;
-  return Math.sqrt(dx*dx + dy*dy + dz*dz);
-}
-
-// ---------------- ULTRA PRO MAX EQUIP SYSTEM ----------------
-async function ultraEquip() {
-  console.log('[ULTRA] Equipping...');
+// ---------------- ANTI-BAN PROTECTION ----------------
+function checkForBanMessage(message) {
+  const lowerMsg = message.toLowerCase();
   
-  const items = bot.inventory.items();
-  
-  // Sword to hand
-  const sword = items.find(i => i.name.includes('sword'));
-  if (sword) {
-    try {
-      await bot.equip(sword, 'hand');
-      console.log(`[ULTRA] ${sword.name} equipped!`);
-    } catch (e) {
-      console.log(`[ULTRA] Sword error: ${e.message}`);
-    }
-  }
-  
-  // Use OP commands for instant gear
-  if (hasOp) {
-    const opCommands = [
-      '/replaceitem entity @s slot.hotbar.0 diamond_sword 1',
-      '/replaceitem entity @s armor.head diamond_helmet 1',
-      '/replaceitem entity @s armor.chest diamond_chestplate 1',
-      '/replaceitem entity @s armor.legs diamond_leggings 1',
-      '/replaceitem entity @s armor.feet diamond_boots 1',
-      '/replaceitem entity @s weapon.offhand shield 1'
-    ];
-    
-    for (const cmd of opCommands) {
-      bot.chat(cmd);
-      await delay(200);
-    }
-    console.log('[ULTRA] OP gear equipped!');
-  }
-  
-  return true;
-}
-
-// ---------------- ULTRA PRO MAX COMBAT SYSTEM ----------------
-function startUltraCombat(target) {
-  console.log(`[ULTRA COMBAT] Engaging ${target.username || 'target'}!`);
-  
-  pvpMode = true;
-  currentTarget = target;
-  
-  // Equip before fighting
-  setTimeout(() => ultraEquip(), 100);
-  
-  // Start attacking
-  setTimeout(() => {
-    try {
-      bot.pvp.attack(target);
-      console.log('[ULTRA COMBAT] Attack started!');
-    } catch (e) {
-      console.log(`[ULTRA COMBAT] Attack error: ${e.message}`);
-    }
-  }, 200);
-  
-  // ULTRA PRO MAX COMBAT LOOP
-  if (combatInterval) clearInterval(combatInterval);
-  combatInterval = setInterval(() => {
-    if (!pvpMode || !currentTarget) {
-      clearInterval(combatInterval);
-      return;
-    }
-    
-    // ULTRA FAST JUMPING for critical hits
-    bot.setControlState('jump', true);
-    setTimeout(() => bot.setControlState('jump', false), 50);
-    
-    // ULTRA SPRINT (always sprint in combat)
-    bot.setControlState('sprint', true);
-    
-    // Check target distance
-    if (currentTarget.position) {
-      const distance = getDistance3D(bot.entity.position, currentTarget.position);
-      
-      // If target is in attack range, keep attacking
-      if (distance <= ATTACK_RANGE) {
-        // Rapid attack (simulate clicking)
-        if (bot.heldItem && bot.heldItem.name.includes('sword')) {
-          // This makes attack speed ultra fast
-          bot.swingArm('right');
-        }
+  for (const trigger of BAN_TRIGGER_WORDS) {
+    if (lowerMsg.includes(trigger)) {
+      // Check if message is about this bot
+      const botNameLower = bot.username.toLowerCase();
+      if (lowerMsg.includes(botNameLower) || 
+          lowerMsg.includes('bot') || 
+          lowerMsg.includes('hack')) {
+        return true;
       }
     }
-    
-  }, ULTRA_JUMP_DELAY); // ULTRA FAST JUMP TIMING
-  
-  // Auto stop combat after 45 seconds
-  setTimeout(() => {
-    if (pvpMode) {
-      console.log('[ULTRA COMBAT] Combat timeout (45s)');
-      stopUltraCombat();
-    }
-  }, MAX_COMBAT_TIME);
+  }
+  return false;
 }
 
-function stopUltraCombat() {
-  console.log('[ULTRA COMBAT] Stopping combat');
+async function antiBanEscape() {
+  console.log('[ANTI-BAN] ⚠️ BAN DETECTED! Initiating escape protocol...');
   
-  pvpMode = false;
-  currentTarget = null;
-  
-  if (combatInterval) {
-    clearInterval(combatInterval);
-    combatInterval = null;
+  // Send fake message to confuse
+  if (Math.random() > 0.5) {
+    bot.chat('?');
+  } else {
+    bot.chat('lag');
   }
   
-  bot.pvp.stop();
-  bot.setControlState('sprint', false);
-  bot.setControlState('jump', false);
+  await delay(500);
+  
+  // Change identity
+  currentName = randomName();
+  currentUUID = uuidv4();
+  
+  console.log(`[ANTI-BAN] 🆕 New identity: ${currentName}`);
+  console.log(`[ANTI-BAN] 🔄 UUID changed: ${currentUUID}`);
+  
+  // Disconnect and reconnect with new identity
+  if (bot) {
+    try {
+      bot.quit('anti-ban protection');
+    } catch (e) {}
+  }
+  
+  // Reset all states
+  resetBot();
+  
+  // Reconnect after delay (random between 3-8 seconds)
+  const reconnectDelay = 3000 + Math.random() * 5000;
+  console.log(`[ANTI-BAN] 🔄 Reconnecting in ${Math.round(reconnectDelay/1000)}s...`);
+  
+  setTimeout(() => {
+    createBot();
+  }, reconnectDelay);
 }
 
-// ---------------- 20 BLOCK SPHERE TELEPORT SYSTEM ----------------
-function startUltraGuard(playerName) {
-  console.log(`[ULTRA GUARD] Guarding ${playerName} with 20-block sphere TP`);
+// ---------------- NETHERITE EQUIPMENT LIST ----------------
+const NETHERITE_GEAR = {
+  // Armor with full enchantments
+  helmet: 'netherite_helmet{Enchantments:[{id:"protection",lvl:4},{id:"unbreaking",lvl:3},{id:"mending",lvl:1},{id:"respiration",lvl:3},{id:"aqua_affinity",lvl:1}]}',
+  chestplate: 'netherite_chestplate{Enchantments:[{id:"protection",lvl:4},{id:"unbreaking",lvl:3},{id:"mending",lvl:1}]}',
+  leggings: 'netherite_leggings{Enchantments:[{id:"protection",lvl:4},{id:"unbreaking",lvl:3},{id:"mending",lvl:1}]}',
+  boots: 'netherite_boots{Enchantments:[{id:"protection",lvl:4},{id:"unbreaking",lvl:3},{id:"mending",lvl:1},{id:"feather_falling",lvl:4},{id:"depth_strider",lvl:3}]}',
   
-  const player = bot.players[playerName];
-  if (!player || !player.entity) {
-    console.log(`[ULTRA GUARD] Player not found`);
+  // Weapons with max enchantments
+  sword: 'netherite_sword{Enchantments:[{id:"sharpness",lvl:5},{id:"unbreaking",lvl:3},{id:"mending",lvl:1},{id:"fire_aspect",lvl:2},{id:"knockback",lvl:2},{id:"looting",lvl:3}]}',
+  shield: 'shield{Enchantments:[{id:"unbreaking",lvl:3},{id:"mending",lvl:1}]}',
+  
+  // Other items
+  bow: 'bow{Enchantments:[{id:"power",lvl:5},{id:"unbreaking",lvl:3},{id:"mending",lvl:1},{id:"flame",lvl:1},{id:"infinity",lvl:1},{id:"punch",lvl:2}]}',
+  golden_apple: 'golden_apple',
+  enchanted_golden_apple: 'enchanted_golden_apple',
+  ender_pearl: 'ender_pearl',
+  arrow: 'arrow',
+  totem: 'totem_of_undying'
+};
+
+// ---------------- EQUIPMENT SYSTEM ----------------
+function isItemInHotbar(item) {
+  return item && item.slot >= 36 && item.slot <= 44;
+}
+
+async function autoHoldAndEquip(itemName) {
+  console.log(`[AUTO] Auto-hold and equip ${itemName}...`);
+  
+  const items = bot.inventory.items();
+  const item = items.find(i => i.name.includes(itemName.split('{')[0])); // Remove NBT for matching
+  
+  if (!item) {
+    console.log(`[AUTO] ${itemName} not found`);
     return false;
   }
   
-  guardedPlayer = playerName;
-  guardMode = true;
-  
-  // Stop any combat
-  stopUltraCombat();
-  
-  // Start 20-block sphere guard system
-  if (guardInterval) clearInterval(guardInterval);
-  guardInterval = setInterval(() => {
-    if (!guardMode || !guardedPlayer) return;
+  // Already in hotbar? Perfect!
+  if (isItemInHotbar(item)) {
+    const hotbarIndex = item.slot - 36;
+    bot.setQuickBarSlot(hotbarIndex);
+    console.log(`[AUTO] Holding ${itemName} in hotbar slot ${hotbarIndex}`);
     
-    const player = bot.players[guardedPlayer];
-    if (!player || !player.entity) {
-      console.log(`[ULTRA GUARD] Lost player`);
-      return;
-    }
+    // Trigger auto-equip actions
+    await delay(200);
+    bot.setControlState('jump', true);
+    await delay(50);
+    bot.setControlState('jump', false);
     
-    const playerPos = player.entity.position;
-    const botPos = bot.entity.position;
-    
-    // Calculate 3D distance (SPHERE - includes up/down)
-    const distance = getDistance3D(playerPos, botPos);
-    
-    console.log(`[ULTRA GUARD] Distance: ${Math.round(distance)} blocks (3D sphere)`);
-    
-    // 🔥 20 BLOCK SPHERE TELEPORT 🔥
-    // Up/Down/Left/Right/Forward/Back ANY DIRECTION > 20 blocks = INSTANT TP
-    if (distance > TELEPORT_DISTANCE && hasOp) {
-      console.log(`[ULTRA GUARD] ${Math.round(distance)} > 20 blocks! TELEPORTING!`);
-      bot.chat(`/tp @s ${guardedPlayer}`);
-      return;
-    }
-    
-    // If close enough (3 blocks), chill
-    if (distance <= 3) {
-      if (bot.pathfinder.isMoving()) {
-        bot.pathfinder.setGoal(null);
-      }
-      return;
-    }
-    
-    // Follow player (smooth)
-    const mcData = require('minecraft-data')(bot.version);
-    const movements = new Movements(bot, mcData);
-    movements.allowSprinting = true;
-    bot.pathfinder.setMovements(movements);
-    
-    bot.pathfinder.setGoal(new goals.GoalNear(
-      playerPos.x,
-      playerPos.y,
-      playerPos.z,
-      3
-    ));
-    
-    // Sprint while following
-    bot.setControlState('sprint', true);
-    
-  }, 500); // Check every 500ms (FAST)
-  
-  console.log(`[ULTRA GUARD] Now guarding with 20-block sphere TP system`);
-  return true;
-}
-
-function stopUltraGuard() {
-  console.log('[ULTRA GUARD] Stopping guard');
-  
-  guardMode = false;
-  guardedPlayer = null;
-  
-  if (guardInterval) {
-    clearInterval(guardInterval);
-    guardInterval = null;
+    return true;
   }
   
-  bot.pathfinder.setGoal(null);
-  bot.setControlState('sprint', false);
-  bot.setControlState('jump', false);
-  
-  console.log('[ULTRA GUARD] Stopped');
+  console.log(`[AUTO] ${itemName} needs to be moved to hotbar`);
+  return false;
 }
 
-// ---------------- HOSTILE DETECTION ----------------
-function isHostileMob(mobType) {
-  if (!mobType) return false;
-  const typeLower = mobType.toLowerCase();
-  const hostiles = ['zombie', 'skeleton', 'spider', 'creeper', 'enderman', 'witch', 
-                   'blaze', 'ghast', 'slime', 'magma_cube', 'guardian', 'shulker'];
-  return hostiles.some(h => typeLower.includes(h));
+async function automaticEquipmentSequence() {
+  if (autoEquipInProgress) return;
+  
+  autoEquipInProgress = true;
+  console.log('[AUTO] ===== STARTING NETHERITE EQUIPMENT =====');
+  
+  await delay(1000);
+  
+  const equipmentOrder = [
+    'netherite_boots',
+    'netherite_leggings', 
+    'netherite_chestplate',
+    'netherite_helmet',
+    'netherite_sword',
+    'shield'
+  ];
+  
+  let successCount = 0;
+  
+  for (const item of equipmentOrder) {
+    try {
+      const success = await autoHoldAndEquip(item);
+      if (success) successCount++;
+      await delay(600);
+    } catch (error) {
+      console.log(`[AUTO ERROR] ${item}: ${error.message}`);
+    }
+  }
+  
+  console.log(`[AUTO] ===== COMPLETE: ${successCount}/${equipmentOrder.length} equipped =====`);
+  autoEquipInProgress = false;
+  return successCount;
 }
 
 // ---------------- CREATE BOT ----------------
@@ -277,6 +197,7 @@ function createBot() {
   botRunning = true;
 
   console.log('[BOT] Creating:', currentName);
+  console.log('[BOT] UUID:', currentUUID);
 
   bot = mineflayer.createBot({
     host: config.server.ip,
@@ -284,284 +205,315 @@ function createBot() {
     username: currentName,
     uuid: currentUUID,
     auth: 'offline',
-    version: config.server.version
+    version: config.server.version || '1.20.1'
   });
 
   bot.loadPlugin(pathfinder);
   bot.loadPlugin(pvp);
 
+  // ---------------- ANTI-BAN MESSAGE DETECTION ----------------
+  bot.on('message', (jsonMsg) => {
+    const message = jsonMsg.toString();
+    const plainMessage = message.replace(/§[0-9a-fk-or]/g, ''); // Remove color codes
+    
+    // Check for ban triggers
+    if (checkForBanMessage(plainMessage)) {
+      console.log(`[ANTI-BAN] Detected potential ban message: "${plainMessage}"`);
+      
+      // Debounce - only trigger once every 10 seconds
+      if (antiBanTimeout) {
+        clearTimeout(antiBanTimeout);
+      }
+      
+      antiBanTimeout = setTimeout(() => {
+        antiBanEscape();
+      }, 2000); // Wait 2 seconds before escaping
+    }
+    
+    // Also check for OP messages
+    const botName = bot.username.toLowerCase();
+    const msg = plainMessage.toLowerCase();
+    
+    if ((msg.includes('opped') && msg.includes(botName)) ||
+        (msg.includes('operator') && msg.includes(botName)) ||
+        msg.includes('you are now op') ||
+        (msg.includes('made') && msg.includes(botName) && msg.includes('op'))) {
+      if (!hasOp) {
+        hasOp = true;
+        opRequested = false;
+        console.log('[OP] Granted!');
+        if (mode === 'hard' && !kitGiven) {
+          kitGiven = true;
+          giveUltimateNetheriteKit();
+        }
+      }
+    }
+  });
+
   // ---------------- SPAWN ----------------
   bot.once('spawn', async () => {
-    console.log('[BOT] Spawned');
+    console.log('[BOT] Spawned as', bot.username);
+    console.log('[BOT] Health:', bot.health, 'Food:', bot.food);
+    
     spawnPos = bot.entity.position.clone();
 
-    const mcData = mcDataLoader(config.server.version);
+    const mcData = mcDataLoader(bot.version);
     const movements = new Movements(bot, mcData);
     bot.pathfinder.setMovements(movements);
 
-    if (config.utils['auto-auth'].enabled) {
+    if (config.utils['auto-auth']?.enabled) {
       await delay(600);
       bot.chat(`/login ${config.utils['auto-auth'].password}`);
     }
 
-    // Auto-equip check
-    setInterval(async () => {
-      if (!guardMode && !pvpMode) {
-        const items = bot.inventory.items();
-        if (items.some(i => i.name.includes('sword'))) {
-          await ultraEquip();
-        }
-      }
-    }, 15000);
+    // Setup auto systems
+    setupAutoSystems();
 
-    // OP check
+    // OP check interval
     if (opCheckInterval) clearInterval(opCheckInterval);
     opCheckInterval = setInterval(() => {
       if (mode === 'hard' && !hasOp && !opRequested) {
-        bot.chat('/op @s');
+        bot.chat('admin please give me operator');
         opRequested = true;
       }
-    }, 10000);
-  });
-
-  // ---------------- OP DETECTION ----------------
-  bot.on('message', (jsonMsg) => {
-    const msg = jsonMsg.toString();
-    console.log(`[SERVER] ${msg}`);
-    
-    const msgLower = msg.toLowerCase();
-    const botName = bot.username.toLowerCase();
-    
-    if (msgLower.includes(botName) && msgLower.includes('op')) {
-      console.log('[OP] DETECTED!');
-      hasOp = true;
-      opRequested = false;
-      
-      if (mode === 'hard' && !kitGiven) {
-        kitGiven = true;
-        giveHardModeKit();
-      }
-    }
-  });
-
-  // ---------------- ATTACK DETECTION (ULTRA RULES) ----------------
-  bot.on('entityHurt', (entity) => {
-    // Rule 1: Bot is attacked → Fight back ULTRA FAST
-    if (entity.id === bot.entity.id) {
-      console.log('[ULTRA] I WAS HIT!');
-      
-      const attacker = bot.nearestEntity(e =>
-        e.type === 'player' &&
-        e.username !== bot.username &&
-        getDistance3D(bot.entity.position, e.position) < 6
-      );
-
-      if (attacker && !pvpMode && !guardMode) {
-        console.log(`[ULTRA] ${attacker.username} hit me! FIGHTING BACK ULTRA FAST!`);
-        startUltraCombat(attacker);
-      }
-    }
-    
-    // Rule 2: Guarded player is attacked → Protect them
-    if (guardMode && guardedPlayer && entity.type === 'player' && entity.username === guardedPlayer) {
-      console.log(`[ULTRA GUARD] ${guardedPlayer} was hit!`);
-      
-      const attacker = bot.nearestEntity(e =>
-        e.type === 'player' &&
-        e.username !== guardedPlayer &&
-        e.username !== bot.username &&
-        getDistance3D(entity.position, e.position) < 8
-      );
-
-      if (attacker && !pvpMode) {
-        console.log(`[ULTRA GUARD] ${attacker.username} attacked my player! ATTACKING!`);
-        startUltraCombat(attacker);
-      }
-    }
+    }, 15000);
   });
 
   // ---------------- CHAT COMMANDS ----------------
   bot.on('chat', async (user, msg) => {
     if (user === bot.username) return;
-    const cmd = msg.toLowerCase().trim();
     
-    console.log(`[CHAT] ${user}: ${msg}`);
+    const cmd = msg.toLowerCase().trim();
+    const userMsg = msg.toLowerCase();
 
-    // 🔥 ULTRA GUARD COMMAND
-    if (cmd === 'guard me') {
-      if (startUltraGuard(user)) {
-        bot.chat(`🛡️ ULTRA GUARD ACTIVATED! I will protect you with 20-block sphere TP!`);
-      }
+    // Anti-ban trigger command (manual)
+    if (cmd === 'panic' || cmd === 'escape' || cmd === 'antiban') {
+      console.log(`[ANTI-BAN] Manual escape triggered by ${user}`);
+      antiBanEscape();
+      return;
     }
 
-    if (cmd === 'stop guard') {
-      if (guardMode && guardedPlayer === user) {
-        stopUltraGuard();
-        bot.chat('🛑 Guard stopped.');
-      }
-    }
-
-    // 🔥 ULTRA PVP COMMAND
-    if (cmd === 'fight' || cmd === 'fight me') {
-      if (guardMode) {
-        bot.chat(`I'm guarding ${guardedPlayer}. Say 'stop guard' first.`);
-        return;
-      }
-      
-      const player = bot.players[user];
-      if (!player) {
-        bot.chat("Can't see you!");
-        return;
-      }
-      
-      bot.chat(`⚔️ ULTRA PVP ENGAGED! Prepare for maximum combat!`);
-      startUltraCombat(player.entity);
-    }
-
-    if (cmd === 'stop fight') {
-      stopUltraCombat();
-      bot.chat('⚔️ Combat stopped.');
-    }
-
-    // 🔥 KIT & EQUIP
-    if (cmd === 'givekit') {
-      hasOp = true;
-      kitGiven = true;
-      giveHardModeKit();
-    }
-
-    if (cmd === 'equip') {
-      await ultraEquip();
-      bot.chat('⚡ Ultra equipped!');
-    }
-
-    // 🔥 MODES
     if (['easy', 'normal', 'hard'].includes(cmd)) {
       mode = cmd;
       hasOp = false;
       opRequested = false;
       kitGiven = false;
-      bot.chat(`🎮 Mode: ${mode.toUpperCase()}`);
+      bot.chat(`Mode: ${mode.toUpperCase()}`);
+      console.log('[MODE]', mode);
     }
 
-    // 🔥 INFO
+    if (cmd === 'ultimateset' || cmd === 'giveultimate') {
+      hasOp = true;
+      kitGiven = true;
+      giveUltimateNetheriteKit();
+    }
+
+    if (cmd === 'autoequip') {
+      bot.chat('Starting auto-equip...');
+      await automaticEquipmentSequence();
+      bot.chat('Auto-equip complete!');
+    }
+
+    if (cmd === 'identity') {
+      bot.chat(`I am ${bot.username}`);
+      bot.chat(`My secret code: ${currentUUID.slice(0, 8)}`);
+    }
+
     if (cmd === 'status') {
-      if (guardMode) {
-        const player = bot.players[guardedPlayer];
-        let distance = 'N/A';
-        if (player && player.entity) {
-          distance = Math.round(getDistance3D(bot.entity.position, player.entity.position));
-        }
-        bot.chat(`🛡️ Guarding ${guardedPlayer} | Distance: ${distance} blocks | HP: ${bot.health}`);
-      } else if (pvpMode) {
-        bot.chat(`⚔️ ULTRA COMBAT | HP: ${bot.health} | Target: ${currentTarget?.username || 'Unknown'}`);
-      } else {
-        bot.chat(`✅ Ready | Mode: ${mode} | HP: ${bot.health} | OP: ${hasOp ? 'YES' : 'NO'}`);
-      }
+      const items = bot.inventory.items();
+      const netheriteCount = items.filter(i => i.name.includes('netherite')).length;
+      
+      bot.chat(`⚔️ ${bot.username} | ❤️${bot.health} | 🍖${bot.food} | Netherite: ${netheriteCount}`);
+      
+      if (bot.inventory.slots[5]) bot.chat(`Helmet: ${bot.inventory.slots[5].name}`);
+      if (bot.inventory.slots[6]) bot.chat(`Chest: ${bot.inventory.slots[6].name}`);
+      if (bot.heldItem) bot.chat(`Weapon: ${bot.heldItem.name}`);
     }
 
-    if (cmd === 'test tp') {
-      if (hasOp) {
-        bot.chat(`/tp @s ${user}`);
-        bot.chat('✅ Teleported!');
-      } else {
-        bot.chat('❌ Need OP!');
-      }
-    }
-
-    if (cmd === 'ultra help') {
-      bot.chat('🔥 ULTRA PRO MAX COMMANDS:');
-      bot.chat('guard me - 20-block sphere guard with instant TP');
-      bot.chat('fight me - Ultra fast PvP combat');
-      bot.chat('givekit - Get full diamond gear');
-      bot.chat('equip - Force equip items');
-      bot.chat('status - Check bot status');
-      bot.chat('test tp - Test teleport');
-      bot.chat('easy/normal/hard - Change mode');
+    if (cmd === 'testban') {
+      // Test anti-ban system
+      bot.chat('Testing anti-ban system...');
+      setTimeout(() => {
+        bot.emit('message', JSON.stringify({ text: `BAN ${bot.username} for hacking!` }));
+      }, 1000);
     }
   });
 
-  // ---------------- PHYSICS TICK ----------------
-  bot.on('physicsTick', () => {
-    // Keep sprinting in guard mode
-    if (guardMode) {
-      bot.setControlState('sprint', true);
+  // ---------------- ATTACK DETECTION ----------------
+  bot.on('entityHurt', (entity) => {
+    if (!bot.entity) return;
+    if (entity.id !== bot.entity.id) return;
+
+    const attacker = bot.nearestEntity(e =>
+      e.type === 'player' &&
+      e.username &&
+      e.username !== bot.username &&
+      e.position.distanceTo(bot.entity.position) < 6
+    );
+
+    if (attacker && !pvpMode) {
+      console.log('[PVP] Attacked by', attacker.username);
+      currentTarget = attacker;
+      pvpMode = true;
+      startPvP();
+    }
+  });
+
+  // ---------------- PVP ----------------
+  async function startPvP() {
+    if (!currentTarget) return;
+    
+    console.log('[PVP] Fighting!');
+    
+    // Auto-equip sword
+    const items = bot.inventory.items();
+    const sword = items.find(i => i.name.includes('sword') && isItemInHotbar(i));
+    if (sword) {
+      bot.setQuickBarSlot(sword.slot - 36);
     }
     
-    // Stop sprinting when idle
-    if (!pvpMode && !guardMode && !bot.pathfinder.isMoving()) {
-      bot.setControlState('sprint', false);
+    try {
+      bot.pvp.attack(currentTarget);
+    } catch (e) {
+      console.log('[PVP] Error:', e.message);
+    }
+  }
+
+  // ---------------- COMBAT MOVEMENT ----------------
+  bot.on('physicsTick', () => {
+    if (!pvpMode || !currentTarget) return;
+    
+    bot.setControlState('sprint', true);
+    if (bot.entity.onGround && Math.random() < 0.1) {
+      bot.setControlState('jump', true);
+      setTimeout(() => bot.setControlState('jump', false), 100);
     }
   });
 
   // ---------------- TARGET GONE ----------------
   bot.on('entityGone', (entity) => {
     if (currentTarget && entity.id === currentTarget.id) {
-      console.log('[ULTRA] Target disappeared');
-      stopUltraCombat();
+      console.log('[PVP] Target gone');
+      pvpMode = false;
+      currentTarget = null;
+      try { bot.pvp.stop(); } catch {}
+      bot.setControlState('sprint', false);
+      bot.setControlState('jump', false);
     }
   });
 
   // ---------------- DISCONNECT ----------------
   bot.on('kicked', (reason) => {
     console.log('[BOT] Kicked:', reason);
-    reset();
+    console.log('[ANTI-BAN] Possible ban detected! Changing identity...');
+    antiBanEscape();
   });
-  bot.on('end', () => {
-    console.log('[BOT] Disconnected');
-    reset();
+  
+  bot.on('end', (reason) => {
+    console.log('[BOT] Disconnected:', reason);
+    resetBot();
   });
+  
   bot.on('error', (err) => {
     console.log('[BOT] Error:', err.message);
   });
 }
 
-// ---------------- HARD MODE KIT ----------------
-async function giveHardModeKit() {
-  if (!bot) return;
-  console.log('[ULTRA KIT] Giving ultra kit...');
+// ---------------- AUTO SYSTEMS ----------------
+function setupAutoSystems() {
+  // Auto-heal
+  setInterval(() => {
+    if (!bot || bot.health >= 15 || autoEquipInProgress) return;
+    
+    const items = bot.inventory.items();
+    const gapple = items.find(i => 
+      (i.name === 'golden_apple' || i.name === 'enchanted_golden_apple') && 
+      isItemInHotbar(i)
+    );
+    
+    if (gapple) {
+      const prevSlot = bot.quickBarSlot;
+      const appleSlot = gapple.slot - 36;
+      
+      bot.setQuickBarSlot(appleSlot);
+      bot.activateItem();
+      console.log(`[AUTO-HEAL] Eating ${gapple.name}...`);
+      
+      setTimeout(() => {
+        const sword = items.find(i => i.name.includes('sword') && isItemInHotbar(i));
+        if (sword) bot.setQuickBarSlot(sword.slot - 36);
+        else bot.setQuickBarSlot(prevSlot);
+      }, 2000);
+    }
+  }, 3000);
+}
 
+// ---------------- ULTIMATE NETHERITE KIT ----------------
+async function giveUltimateNetheriteKit() {
+  if (!bot) return;
+  console.log('[KIT] Giving ULTIMATE NETHERITE kit...');
+  bot.chat('Getting ultimate netherite gear...');
+
+  // Clear inventory first
+  if (hasOp) {
+    bot.chat('/clear');
+    await delay(1000);
+  }
+
+  // Give enchanted netherite gear
   const commands = [
-    '/give @s diamond_sword 1',
-    '/give @s diamond_helmet 1',
-    '/give @s diamond_chestplate 1',
-    '/give @s diamond_leggings 1',
-    '/give @s diamond_boots 1',
-    '/give @s shield 1',
-    '/give @s bow 1',
-    '/give @s arrow 64',
-    '/give @s golden_apple 32',
-    '/give @s ender_pearl 32'
+    `/give @s ${NETHERITE_GEAR.sword} 1`,
+    `/give @s ${NETHERITE_GEAR.helmet} 1`,
+    `/give @s ${NETHERITE_GEAR.chestplate} 1`,
+    `/give @s ${NETHERITE_GEAR.leggings} 1`,
+    `/give @s ${NETHERITE_GEAR.boots} 1`,
+    `/give @s ${NETHERITE_GEAR.shield} 1`,
+    `/give @s ${NETHERITE_GEAR.bow} 1`,
+    `/give @s ${NETHERITE_GEAR.arrow} 64`,
+    `/give @s ${NETHERITE_GEAR.enchanted_golden_apple} 32`,
+    `/give @s ${NETHERITE_GEAR.ender_pearl} 32`,
+    `/give @s ${NETHERITE_GEAR.totem} 5`,
+    `/give @s netherite_pickaxe{Enchantments:[{id:"efficiency",lvl:5},{id:"unbreaking",lvl:3},{id:"mending",lvl:1}]} 1`,
+    `/give @s netherite_axe{Enchantments:[{id:"sharpness",lvl:5},{id:"efficiency",lvl:5},{id:"unbreaking",lvl:3},{id:"mending",lvl:1}]} 1`
   ];
 
   for (const cmd of commands) {
     bot.chat(cmd);
-    await delay(300);
+    await delay(400);
   }
 
-  console.log('[ULTRA KIT] Done, auto-equipping...');
-  await delay(2000);
-  await ultraEquip();
-  bot.chat('🔥 ULTRA KIT READY! Maximum power achieved!');
+  console.log('[KIT] Ultimate kit given!');
+  await delay(3000);
+  
+  // Auto-equip
+  console.log('[KIT] Auto-equipping ultimate gear...');
+  bot.chat('Auto-equipping ultimate netherite gear...');
+  
+  setTimeout(async () => {
+    await automaticEquipmentSequence();
+    bot.chat('⚔️ ULTIMATE NETHERITE READY! ⚔️');
+  }, 1500);
 }
 
-// ---------------- RESET ----------------
-function reset() {
-  if (opCheckInterval) clearInterval(opCheckInterval);
-  if (guardInterval) clearInterval(guardInterval);
-  if (combatInterval) clearInterval(combatInterval);
+// ---------------- RESET BOT ----------------
+function resetBot() {
+  if (opCheckInterval) {
+    clearInterval(opCheckInterval);
+    opCheckInterval = null;
+  }
+  
+  if (antiBanTimeout) {
+    clearTimeout(antiBanTimeout);
+    antiBanTimeout = null;
+  }
   
   botRunning = false;
   pvpMode = false;
-  guardMode = false;
-  guardedPlayer = null;
   currentTarget = null;
   hasOp = false;
   opRequested = false;
   kitGiven = false;
-
-  console.log('[BOT] Reconnecting in 3s...');
-  setTimeout(createBot, 3000);
+  autoEquipInProgress = false;
 }
 
 // ---------------- START ----------------
