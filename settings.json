@@ -7,7 +7,7 @@
 
   "server": {
     "ip": "japan-limiting.gl.joinmc.link",
-    "port": 44947,
+    "port": 25565,
     "version": "1.20.1"
   },
 
