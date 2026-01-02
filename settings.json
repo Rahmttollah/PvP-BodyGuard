@@ -6,8 +6,8 @@
   },
 
   "server": {
-    "ip": "japan-limiting.gl.joinmc.link",
-    "port": 25565,
+    "ip": "offer-sitting.gl.joinmc.link",
+    "port": 53767,
     "version": "1.20.1"
   },
 
