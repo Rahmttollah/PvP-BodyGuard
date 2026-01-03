@@ -5,6 +5,7 @@
     "type": "offline"
   },
 
+  
   "server": {
     "ip": "offer-sitting.gl.joinmc.link",
     "port": 53767,
